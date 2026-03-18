@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GH Scanner — Secret Leak Detector</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #1e1e2e;
+    --accent: #00ff88;
+    --accent2: #ff3366;
+    --accent3: #ffaa00;
+    --text: #e0e0f0;
+    --muted: #555570;
+    --card: #13131f;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 60px 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  .header {
+    margin-bottom: 48px;
+    animation: fadeDown 0.6s ease both;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .logo::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -1px;
+  }
+
+  h1 span { color: var(--accent); }
+
+  .subtitle {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* Input area */
+  .input-section {
+    animation: fadeUp 0.6s 0.1s ease both;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .input-wrapper {
+    flex: 1;
+    position: relative;
+  }
+
+  .input-label {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    padding: 14px 16px 14px 48px;
+    border-radius: 4px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  input[type="text"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(0,255,136,0.1);
+  }
+
+  input[type="text"]::placeholder { color: var(--muted); }
+
+  .input-icon {
+    position: absolute;
+    left: 16px;
+    bottom: 14px;
+    color: var(--muted);
+    font-size: 16px;
+  }
+
+  /* Token field */
+  .token-row {
+    margin-top: 12px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+  }
+
+  .token-hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+
+  .token-hint a { color: var(--accent); text-decoration: none; }
+
+  /* Scan button */
+  .scan-btn {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 0 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    height: 48px;
+    margin-top: 24px;
+    align-self: flex-end;
+  }
+
+  .scan-btn:hover {
+    background: #00ffaa;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px rgba(0,255,136,0.3);
+  }
+
+  .scan-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* Progress */
+  .progress-bar-wrap {
+    margin-top: 24px;
+    display: none;
+  }
+
+  .progress-label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .progress-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s ease;
+    border-radius: 2px;
+  }
+
+  .log-line {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 8px;
+    min-height: 16px;
+  }
+
+  .log-line span { color: var(--accent); }
+
+  /* Stats bar */
+  .stats-bar {
+    display: none;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 32px;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--text);
+  }
+
+  .stat-value.danger { color: var(--accent2); }
+  .stat-value.warn { color: var(--accent3); }
+  .stat-value.safe { color: var(--accent); }
+
+  /* Results */
+  .results-section {
+    margin-top: 40px;
+  }
+
+  .results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+
+  .results-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .filter-tabs {
+    display: flex;
+    gap: 8px;
+  }
+
+  .filter-tab {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 4px 12px;
+    border-radius: 2px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .filter-tab.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(0,255,136,0.05);
+  }
+
+  /* Finding card */
+  .finding-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    animation: fadeUp 0.3s ease both;
+  }
+
+  .finding-card.medium { border-left-color: var(--accent3); }
+  .finding-card.low { border-left-color: var(--muted); }
+
+  .finding-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .finding-header:hover { background: rgba(255,255,255,0.02); }
+
+  .finding-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .severity-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 2px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .badge-critical { background: rgba(255,51,102,0.15); color: var(--accent2); }
+  .badge-medium { background: rgba(255,170,0,0.15); color: var(--accent3); }
+  .badge-low { background: rgba(85,85,112,0.2); color: var(--muted); }
+
+  .finding-type {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .finding-path {
+    font-size: 11px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .expand-icon {
+    color: var(--muted);
+    font-size: 12px;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+  }
+
+  .finding-card.open .expand-icon { transform: rotate(180deg); }
+
+  .finding-body {
+    display: none;
+    padding: 0 16px 16px;
+    border-top: 1px solid var(--border);
+  }
+
+  .finding-card.open .finding-body { display: block; }
+
+  .code-block {
+    background: #0d0d14;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 12px;
+    margin-top: 12px;
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.6;
+    color: #aaaacc;
+  }
+
+  .code-block .highlight {
+    background: rgba(255,51,102,0.2);
+    color: var(--accent2);
+    border-radius: 2px;
+    padding: 0 2px;
+  }
+
+  .finding-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  .action-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 6px 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .action-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .action-btn.primary { border-color: var(--accent); color: var(--accent); background: rgba(0,255,136,0.05); }
+
+  /* Notice template */
+  .notice-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .notice-modal.open { display: flex; }
+
+  .notice-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    max-width: 600px;
+    width: 100%;
+    padding: 28px;
+    animation: fadeUp 0.25s ease both;
+  }
+
+  .notice-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 16px;
+    color: var(--accent);
+  }
+
+  .notice-text {
+    background: #0d0d14;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 16px;
+    font-size: 12px;
+    line-height: 1.8;
+    color: var(--text);
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .notice-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    justify-content: flex-end;
+  }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+
+  .empty-icon { font-size: 48px; margin-bottom: 16px; }
+  .empty-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .empty-sub { font-size: 12px; line-height: 1.6; }
+
+  /* Profile section */
+  .profile-card {
+    display: none;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    align-items: center;
+    gap: 16px;
+    animation: fadeUp 0.3s ease both;
+  }
+
+  .profile-card.show { display: flex; }
+
+  .profile-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    object-fit: cover;
+  }
+
+  .profile-info { flex: 1; }
+
+  .profile-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  .profile-stats {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* Animations */
+  @keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(0,0,0,0.3);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .error-msg {
+    color: var(--accent2);
+    font-size: 12px;
+    margin-top: 8px;
+    display: none;
+  }
+
+  .rate-warn {
+    font-size: 11px;
+    color: var(--accent3);
+    margin-top: 8px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">GH Scanner</div>
+    <h1>Detect <span>Secret Leaks</span><br>on GitHub</h1>
+    <p class="subtitle">Scan any public GitHub profile for exposed API keys, tokens, credentials.<br>Find them. Notify the owner. Help secure the ecosystem.</p>
+  </div>
+
+  <!-- Input -->
+  <div class="input-section">
+    <label class="input-label">GitHub Profile URL or Username</label>
+    <div class="input-row">
+      <div class="input-wrapper">
+        <span class="input-icon">⌂</span>
+        <input type="text" id="profileInput" placeholder="github.com/username  or  username" />
+      </div>
+      <button class="scan-btn" id="scanBtn" onclick="startScan()">
+        ▶ SCAN
+      </button>
+    </div>
+
+    <!-- Optional token -->
+    <div class="token-row">
+      <div class="input-wrapper" style="flex:1">
+        <label class="input-label" style="margin-top:12px">GitHub Token (optional — untuk rate limit lebih tinggi)</label>
+        <div style="position:relative">
+          <span class="input-icon">🔑</span>
+          <input type="password" id="tokenInput" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" />
+        </div>
+        <p class="token-hint">Tanpa token: 60 req/jam. Dengan token: 5000 req/jam. Token hanya disimpan di browser kamu. <a href="https://github.com/settings/tokens" target="_blank">Buat token →</a></p>
+      </div>
+    </div>
+
+    <div class="error-msg" id="errorMsg"></div>
+    <div class="rate-warn" id="rateWarn">⚠ Mendekati rate limit GitHub API. Tambahkan token untuk scan lebih banyak.</div>
+
+    <!-- Progress -->
+    <div class="progress-bar-wrap" id="progressWrap">
+      <div class="progress-label">
+        <span id="progressLabel">Scanning...</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="log-line" id="logLine">→ <span>Fetching repositories...</span></div>
+    </div>
+  </div>
+
+  <!-- Profile card -->
+  <div class="profile-card" id="profileCard">
+    <img class="profile-avatar" id="profileAvatar" src="" alt="">
+    <div class="profile-info">
+      <div class="profile-name" id="profileName"></div>
+      <div class="profile-stats" id="profileStats"></div>
+    </div>
+    <a id="profileLink" href="#" target="_blank" class="action-btn">View Profile →</a>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-card">
+      <div class="stat-label">Repos Scanned</div>
+      <div class="stat-value" id="statRepos">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Files Checked</div>
+      <div class="stat-value" id="statFiles">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Leaks Found</div>
+      <div class="stat-value danger" id="statLeaks">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Severity</div>
+      <div class="stat-value warn" id="statSeverity">—</div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="results-section" id="resultsSection" style="display:none">
+    <div class="results-header">
+      <div class="results-title">Findings</div>
+      <div class="filter-tabs">
+        <button class="filter-tab active" onclick="filterFindings('all', this)">All</button>
+        <button class="filter-tab" onclick="filterFindings('critical', this)">Critical</button>
+        <button class="filter-tab" onclick="filterFindings('medium', this)">Medium</button>
+        <button class="filter-tab" onclick="filterFindings('low', this)">Low</button>
+      </div>
+    </div>
+    <div id="findingsContainer"></div>
+  </div>
+
+</div>
+
+<!-- Notice modal -->
+<div class="notice-modal" id="noticeModal" onclick="closeModal(event)">
+  <div class="notice-box">
+    <div class="notice-title">📬 Responsible Disclosure Template</div>
+    <div class="notice-text" id="noticeText"></div>
+    <div class="notice-actions">
+      <button class="action-btn" onclick="document.getElementById('noticeModal').classList.remove('open')">Close</button>
+      <button class="action-btn primary" onclick="copyNotice()">Copy Text</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// SECRET PATTERNS
+// ============================================================
+const SECRET_PATTERNS = [
+  // Critical
+  { name: 'AWS Access Key', regex: /AKIA[0-9A-Z]{16}/g, severity: 'critical', type: 'AWS' },
+  { name: 'AWS Secret Key', regex: /(?:aws_secret|AWS_SECRET)[_\s]*[=:][_\s]*['"]?([A-Za-z0-9/+=]{40})['"]?/gi, severity: 'critical', type: 'AWS' },
+  { name: 'GitHub Token (classic)', regex: /ghp_[a-zA-Z0-9]{36}/g, severity: 'critical', type: 'GitHub' },
+  { name: 'GitHub Token (fine-grained)', regex: /github_pat_[a-zA-Z0-9_]{82}/g, severity: 'critical', type: 'GitHub' },
+  { name: 'Stripe Secret Key', regex: /sk_live_[0-9a-zA-Z]{24,}/g, severity: 'critical', type: 'Stripe' },
+  { name: 'Stripe Restricted Key', regex: /rk_live_[0-9a-zA-Z]{24,}/g, severity: 'critical', type: 'Stripe' },
+  { name: 'Private Key (PEM)', regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g, severity: 'critical', type: 'Crypto' },
+  { name: 'Slack Bot Token', regex: /xoxb-[0-9]{11}-[0-9]{11}-[a-zA-Z0-9]{24}/g, severity: 'critical', type: 'Slack' },
+  { name: 'Slack User Token', regex: /xoxp-[0-9]{11}-[0-9]{11}-[0-9]{11}-[a-zA-Z0-9]{32}/g, severity: 'critical', type: 'Slack' },
+  { name: 'Twilio Auth Token', regex: /(?:twilio|TWILIO)[^=]*=\s*['"]?([a-zA-Z0-9]{32})['"]?/gi, severity: 'critical', type: 'Twilio' },
+  { name: 'Telegram Bot Token', regex: /[0-9]{8,10}:[a-zA-Z0-9_-]{35}/g, severity: 'critical', type: 'Telegram' },
+  { name: 'Anthropic API Key', regex: /sk-ant-[a-zA-Z0-9\-_]{40,}/g, severity: 'critical', type: 'Anthropic' },
+  { name: 'OpenAI API Key', regex: /sk-(?:proj-)?[a-zA-Z0-9]{48,}/g, severity: 'critical', type: 'OpenAI' },
+  { name: 'Firebase Config', regex: /AIza[0-9A-Za-z\-_]{35}/g, severity: 'critical', type: 'Google/Firebase' },
+  { name: 'GCP Service Account', regex: /"type":\s*"service_account"/g, severity: 'critical', type: 'GCP' },
+  { name: 'Sendgrid API Key', regex: /SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}/g, severity: 'critical', type: 'SendGrid' },
+  { name: 'Mailgun API Key', regex: /key-[0-9a-zA-Z]{32}/g, severity: 'critical', type: 'Mailgun' },
+  { name: 'Heroku API Key', regex: /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, severity: 'medium', type: 'Heroku' },
+
+  // Medium
+  { name: 'Database URL (Postgres)', regex: /postgres(?:ql)?:\/\/[^:]+:[^@]+@[^\s"']+/gi, severity: 'medium', type: 'Database' },
+  { name: 'Database URL (MySQL)', regex: /mysql:\/\/[^:]+:[^@]+@[^\s"']+/gi, severity: 'medium', type: 'Database' },
+  { name: 'Database URL (MongoDB)', regex: /mongodb(?:\+srv)?:\/\/[^:]+:[^@]+@[^\s"']+/gi, severity: 'medium', type: 'Database' },
+  { name: 'Database URL (Redis)', regex: /redis:\/\/[^:]+:[^@]+@[^\s"']+/gi, severity: 'medium', type: 'Database' },
+  { name: 'JWT Token', regex: /eyJ[A-Za-z0-9\-_=]+\.eyJ[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_+/=]*/g, severity: 'medium', type: 'JWT' },
+  { name: 'Generic Secret (env)', regex: /(?:secret|password|passwd|pwd|api_key|apikey|api_secret)\s*[=:]\s*['"]([^'"]{8,})['"]?/gi, severity: 'medium', type: 'Generic' },
+  { name: 'Basic Auth in URL', regex: /https?:\/\/[^:]+:[^@]+@[^\s"']+/gi, severity: 'medium', type: 'Auth' },
+
+  // Low
+  { name: 'IP Address (internal)', regex: /(?:192\.168|10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}/g, severity: 'low', type: 'Network' },
+  { name: 'Email in code', regex: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g, severity: 'low', type: 'PII' },
+];
+
+// File extensions to scan
+const SCAN_EXTENSIONS = [
+  '.env', '.env.local', '.env.development', '.env.production', '.env.example',
+  '.js', '.ts', '.py', '.rb', '.php', '.java', '.go', '.rs', '.cs', '.cpp',
+  '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.config',
+  '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat',
+  '.properties', '.xml', '.plist'
+];
+
+// Files to skip
+const SKIP_FILES = ['node_modules', 'vendor', 'dist', 'build', '.git', 'test', 'spec', '__pycache__'];
+
+// State
+let allFindings = [];
+let currentUser = '';
+let scanAborted = false;
+
+function getToken() {
+  return document.getElementById('tokenInput').value.trim();
+}
+
+function getHeaders() {
+  const token = getToken();
+  const h = { 'Accept': 'application/vnd.github.v3+json' };
+  if (token) h['Authorization'] = `token ${token}`;
+  return h;
+}
+
+function extractUsername(input) {
+  input = input.trim();
+  const match = input.match(/github\.com\/([a-zA-Z0-9\-_.]+)/);
+  if (match) return match[1];
+  return input.replace(/^@/, '');
+}
+
+function setProgress(pct, label, log) {
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressPct').textContent = Math.round(pct) + '%';
+  if (label) document.getElementById('progressLabel').textContent = label;
+  if (log) document.getElementById('logLine').innerHTML = `→ <span>${log}</span>`;
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideError() {
+  document.getElementById('errorMsg').style.display = 'none';
+}
+
+function redactSecret(str) {
+  if (str.length <= 8) return '***';
+  return str.substring(0, 4) + '****' + str.substring(str.length - 4);
+}
+
+function highlightMatch(content, match) {
+  const redacted = redactSecret(match);
+  const escaped = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escapedMatch = match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escaped.replace(new RegExp(escapedMatch, 'g'), `<span class="highlight">${redacted}</span>`);
+}
+
+function getContext(content, index, matchLen, contextLen = 120) {
+  const start = Math.max(0, index - contextLen);
+  const end = Math.min(content.length, index + matchLen + contextLen);
+  let snippet = content.substring(start, end);
+  const matchInSnippet = content.substring(index, index + matchLen);
+  if (start > 0) snippet = '...' + snippet;
+  if (end < content.length) snippet = snippet + '...';
+  return { snippet, match: matchInSnippet };
+}
+
+function scanContent(content, filePath, repoName) {
+  const findings = [];
+  const lines = content.split('\n');
+
+  for (const pattern of SECRET_PATTERNS) {
+    pattern.regex.lastIndex = 0;
+    let match;
+    while ((match = pattern.regex.exec(content)) !== null) {
+      const matchStr = match[0];
+      // Skip if looks like a placeholder
+      if (/your[_-]?key|example|placeholder|xxx|test|dummy|sample|replace/i.test(matchStr)) continue;
+      if (matchStr.length < 8) continue;
+
+      // Get line number
+      const beforeMatch = content.substring(0, match.index);
+      const lineNum = beforeMatch.split('\n').length;
+      const lineContent = lines[lineNum - 1] || '';
+
+      // Skip comment-only lines
+      if (/^\s*[#\/\/]/.test(lineContent) && !/key|secret|token|password/i.test(lineContent)) continue;
+
+      const { snippet } = getContext(content, match.index, matchStr.length);
+
+      findings.push({
+        type: pattern.name,
+        category: pattern.type,
+        severity: pattern.severity,
+        repo: repoName,
+        file: filePath,
+        line: lineNum,
+        match: matchStr,
+        snippet: snippet,
+        url: `https://github.com/${currentUser}/${repoName}/blob/HEAD/${filePath}#L${lineNum}`
+      });
+
+      // Only first match per pattern per file to avoid spam
+      break;
+    }
+  }
+
+  return findings;
+}
+
+async function fetchWithCheck(url) {
+  const res = await fetch(url, { headers: getHeaders() });
+  if (res.status === 403) {
+    document.getElementById('rateWarn').style.display = 'block';
+    throw new Error('Rate limit exceeded');
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res;
+}
+
+async function getRepoFiles(username, repoName, treeSha = 'HEAD') {
+  try {
+    const res = await fetchWithCheck(`https://api.github.com/repos/${username}/${repoName}/git/trees/${treeSha}?recursive=1`);
+    const data = await res.json();
+    if (!data.tree) return [];
+    return data.tree.filter(f => {
+      if (f.type !== 'blob') return false;
+      const lower = f.path.toLowerCase();
+      if (SKIP_FILES.some(s => lower.includes(s))) return false;
+      // Accept .env files explicitly
+      if (lower.includes('.env')) return true;
+      // Accept by extension
+      return SCAN_EXTENSIONS.some(ext => lower.endsWith(ext));
+    });
+  } catch { return []; }
+}
+
+async function getFileContent(username, repoName, path) {
+  try {
+    const res = await fetchWithCheck(`https://api.github.com/repos/${username}/${repoName}/contents/${encodeURIComponent(path)}`);
+    const data = await res.json();
+    if (data.encoding === 'base64') {
+      return atob(data.content.replace(/\n/g, ''));
+    }
+    return null;
+  } catch { return null; }
+}
+
+async function startScan() {
+  const input = document.getElementById('profileInput').value;
+  if (!input.trim()) { showError('Masukkan username atau URL GitHub'); return; }
+
+  hideError();
+  scanAborted = false;
+  allFindings = [];
+  currentUser = extractUsername(input);
+
+  if (!currentUser) { showError('Format tidak valid'); return; }
+
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> SCANNING';
+
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('statsBar').style.display = 'none';
+  document.getElementById('resultsSection').style.display = 'none';
+  document.getElementById('findingsContainer').innerHTML = '';
+  document.getElementById('profileCard').classList.remove('show');
+  document.getElementById('rateWarn').style.display = 'none';
+
+  try {
+    // Fetch user profile
+    setProgress(2, 'Fetching profile...', `Looking up @${currentUser}`);
+    const userRes = await fetchWithCheck(`https://api.github.com/users/${currentUser}`);
+    const userData = await userRes.json();
+
+    // Show profile card
+    document.getElementById('profileAvatar').src = userData.avatar_url;
+    document.getElementById('profileName').textContent = userData.name || userData.login;
+    document.getElementById('profileStats').textContent = `${userData.public_repos} public repos · ${userData.followers} followers`;
+    document.getElementById('profileLink').href = userData.html_url;
+    document.getElementById('profileCard').classList.add('show');
+
+    // Fetch repos
+    setProgress(5, 'Fetching repositories...', 'Getting list of public repos');
+    let repos = [];
+    let page = 1;
+    while (true) {
+      const r = await fetchWithCheck(`https://api.github.com/users/${currentUser}/repos?per_page=100&page=${page}&sort=pushed`);
+      const data = await r.json();
+      if (!data.length) break;
+      repos = repos.concat(data.filter(r => !r.fork));
+      if (data.length < 100) break;
+      page++;
+    }
+
+    if (!repos.length) {
+      setProgress(100, 'Done', 'No public repos found');
+      showStats(0, 0, []);
+      return;
+    }
+
+    setProgress(10, `Scanning ${repos.length} repositories...`, `Found ${repos.length} repos`);
+
+    let totalFiles = 0;
+    let scannedFiles = 0;
+
+    // First pass: collect file list
+    const repoFileSets = [];
+    for (let i = 0; i < repos.length; i++) {
+      const repo = repos[i];
+      const pct = 10 + (i / repos.length) * 20;
+      setProgress(pct, 'Indexing files...', `Indexing ${repo.name}`);
+      const files = await getRepoFiles(currentUser, repo.name);
+      repoFileSets.push({ repo, files });
+      totalFiles += files.length;
+    }
+
+    setProgress(30, 'Scanning files...', `${totalFiles} files to scan`);
+
+    // Second pass: scan content
+    for (let ri = 0; ri < repoFileSets.length; ri++) {
+      const { repo, files } = repoFileSets[ri];
+
+      for (let fi = 0; fi < files.length; fi++) {
+        scannedFiles++;
+        const pct = 30 + (scannedFiles / Math.max(totalFiles, 1)) * 65;
+        setProgress(pct, `Scanning ${repo.name}...`, `${repo.name}/${files[fi].path}`);
+
+        const content = await getFileContent(currentUser, repo.name, files[fi].path);
+        if (!content) continue;
+
+        const found = scanContent(content, files[fi].path, repo.name);
+        if (found.length) {
+          allFindings.push(...found);
+          renderFinding(found[found.length - 1]);
+          document.getElementById('statLeaks').textContent = allFindings.length;
+          document.getElementById('resultsSection').style.display = 'block';
+        }
+      }
+    }
+
+    setProgress(100, 'Scan complete', `Done — ${allFindings.length} findings in ${scannedFiles} files`);
+    showStats(repos.length, scannedFiles, allFindings);
+
+  } catch (err) {
+    if (err.message.includes('Rate limit')) {
+      showError('Rate limit tercapai. Tambahkan GitHub token untuk melanjutkan.');
+    } else if (err.message.includes('404')) {
+      showError(`User "${currentUser}" tidak ditemukan.`);
+    } else {
+      showError('Error: ' + err.message);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ SCAN';
+  }
+}
+
+function showStats(repos, files, findings) {
+  document.getElementById('statsBar').style.display = 'grid';
+  document.getElementById('statRepos').textContent = repos;
+  document.getElementById('statFiles').textContent = files;
+  document.getElementById('statLeaks').textContent = findings.length;
+
+  const hasCritical = findings.some(f => f.severity === 'critical');
+  const hasMedium = findings.some(f => f.severity === 'medium');
+  const sevEl = document.getElementById('statSeverity');
+  if (hasCritical) { sevEl.textContent = 'CRITICAL'; sevEl.className = 'stat-value danger'; }
+  else if (hasMedium) { sevEl.textContent = 'MEDIUM'; sevEl.className = 'stat-value warn'; }
+  else if (findings.length) { sevEl.textContent = 'LOW'; sevEl.className = 'stat-value'; }
+  else { sevEl.textContent = 'CLEAN ✓'; sevEl.className = 'stat-value safe'; }
+
+  if (findings.length === 0) {
+    document.getElementById('resultsSection').style.display = 'block';
+    document.getElementById('findingsContainer').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">✓</div>
+        <div class="empty-title">No leaks detected</div>
+        <div class="empty-sub">Scanned ${files} files across ${repos} repositories.<br>No known secret patterns found.</div>
+      </div>`;
+  }
+}
+
+function renderFinding(finding) {
+  const container = document.getElementById('findingsContainer');
+  const id = 'f' + Date.now() + Math.random();
+  const severityClass = finding.severity === 'critical' ? '' : finding.severity;
+  const badgeClass = finding.severity === 'critical' ? 'badge-critical' : finding.severity === 'medium' ? 'badge-medium' : 'badge-low';
+
+  const snippetHighlighted = highlightMatch(finding.snippet, finding.match);
+
+  const card = document.createElement('div');
+  card.className = `finding-card ${severityClass}`;
+  card.dataset.severity = finding.severity;
+  card.innerHTML = `
+    <div class="finding-header" onclick="toggleCard(this)">
+      <div class="finding-meta">
+        <span class="severity-badge ${badgeClass}">${finding.severity}</span>
+        <span class="finding-type">${finding.type}</span>
+        <span class="finding-path">${finding.repo}/${finding.file}:${finding.line}</span>
+      </div>
+      <span class="expand-icon">▼</span>
+    </div>
+    <div class="finding-body">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">
+        Category: <span style="color:var(--text)">${finding.category}</span> &nbsp;·&nbsp;
+        Repo: <span style="color:var(--text)">${finding.repo}</span> &nbsp;·&nbsp;
+        Line: <span style="color:var(--text)">${finding.line}</span>
+      </div>
+      <div class="code-block">${snippetHighlighted}</div>
+      <div class="finding-actions">
+        <a href="${finding.url}" target="_blank" class="action-btn">View on GitHub ↗</a>
+        <button class="action-btn" onclick="showNotice('${finding.repo}', '${finding.type}', '${finding.file}', '${finding.line}')">📬 Notice Template</button>
+        <button class="action-btn" onclick="copyPath('${finding.repo}/${finding.file}:${finding.line}')">Copy Path</button>
+      </div>
+    </div>`;
+  container.appendChild(card);
+}
+
+function toggleCard(header) {
+  const card = header.closest('.finding-card');
+  card.classList.toggle('open');
+}
+
+function filterFindings(severity, btn) {
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.finding-card').forEach(card => {
+    if (severity === 'all' || card.dataset.severity === severity) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+function showNotice(repo, type, file, line) {
+  const template = `Hi,
+
+I was doing a security scan of public GitHub repositories and found what appears to be an exposed ${type} in your repository.
+
+📁 Repository: github.com/${currentUser}/${repo}
+📄 File: ${file} (line ${line})
+🔑 Type: ${type}
+
+This credential appears to be committed directly in your code, which could allow unauthorized access if it's still active.
+
+Recommended actions:
+1. Revoke/rotate this credential immediately
+2. Remove it from git history (git filter-branch or BFG Repo Cleaner)
+3. Use environment variables or a secrets manager going forward
+4. Check your provider's dashboard for any suspicious activity
+
+This is a responsible disclosure — I have not used or shared this credential.
+
+Stay safe,
+A fellow developer`;
+
+  document.getElementById('noticeText').textContent = template;
+  document.getElementById('noticeModal').classList.add('open');
+}
+
+function copyNotice() {
+  navigator.clipboard.writeText(document.getElementById('noticeText').textContent);
+  const btn = event.target;
+  btn.textContent = 'Copied!';
+  setTimeout(() => btn.textContent = 'Copy Text', 1500);
+}
+
+function copyPath(path) {
+  navigator.clipboard.writeText(path);
+}
+
+function closeModal(event) {
+  if (event.target === document.getElementById('noticeModal')) {
+    document.getElementById('noticeModal').classList.remove('open');
+  }
+}
+
+// Enter key
+document.getElementById('profileInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startScan();
+});
+</script>
+</body>
+</html>
