@@ -751,6 +751,49 @@ const SCAN_EXTENSIONS = [
 // Files to skip
 const SKIP_FILES = ['node_modules', 'vendor', 'dist', 'build', '.git', 'test', 'spec', '__pycache__'];
 
+// Doc/example folders — skip yaml/yml inside these (swagger, openapi docs)
+const DOC_FOLDERS = ['docs', 'doc', 'swagger', 'openapi', 'api-docs', 'api/fixer', 'api/admin', 'fixtures', 'mocks', 'examples', 'example'];
+
+// Masked / placeholder value patterns — skip these entirely
+const MASKED_VALUE_PATTERNS = [
+  /^\*+$/,                          // ******
+  /^#+$/,                           // ######
+  /^x+$/i,                          // xxxxxx
+  /^0+$/,                           // 000000
+  /^your[_\-\s]/i,                  // your_key, your-secret
+  /^<.*>$/,                         // <YOUR_KEY>
+  /^\$\{.*\}$/,                     // ${SECRET}
+  /^%.*%$/,                         // %SECRET%
+  /placeholder|example|sample|dummy|replace|changeme|insert|todo|fake|test/i,
+  /^(sk|pk|api|key|token|secret|password)[-_]?(here|value|goes|here)$/i,
+];
+
+function isMaskedValue(val) {
+  if (!val) return true;
+  const v = val.trim();
+  return MASKED_VALUE_PATTERNS.some(p => p.test(v));
+}
+
+function isDocFile(filePath) {
+  const lower = filePath.toLowerCase();
+  // Skip yaml/yml that are clearly API documentation
+  if ((lower.endsWith('.yaml') || lower.endsWith('.yml')) &&
+      DOC_FOLDERS.some(f => lower.includes('/' + f + '/') || lower.startsWith(f + '/'))) {
+    return true;
+  }
+  // Skip openapi/swagger spec files by name
+  if (/openapi|swagger|api-spec|api_spec/.test(lower) && (lower.endsWith('.yaml') || lower.endsWith('.yml') || lower.endsWith('.json'))) {
+    return true;
+  }
+  return false;
+}
+
+function isInsideExampleBlock(content, matchIndex) {
+  // Look back up to 300 chars for an 'examples:' or '"example"' block context
+  const lookback = content.substring(Math.max(0, matchIndex - 300), matchIndex);
+  return /examples?\s*:/i.test(lookback) || /"example"\s*:/i.test(lookback);
+}
+
 // State
 let allFindings = [];
 let currentUser = '';
@@ -817,14 +860,21 @@ function scanContent(content, filePath, repoName) {
   const findings = [];
   const lines = content.split('\n');
 
+  // Skip documentation/spec files entirely
+  if (isDocFile(filePath)) return findings;
+
   for (const pattern of SECRET_PATTERNS) {
     pattern.regex.lastIndex = 0;
     let match;
     while ((match = pattern.regex.exec(content)) !== null) {
       const matchStr = match[0];
-      // Skip if looks like a placeholder
-      if (/your[_-]?key|example|placeholder|xxx|test|dummy|sample|replace/i.test(matchStr)) continue;
+
+      // Skip masked / placeholder values
+      if (isMaskedValue(matchStr)) continue;
       if (matchStr.length < 8) continue;
+
+      // Skip if inside an examples: block (swagger/openapi docs)
+      if (isInsideExampleBlock(content, match.index)) continue;
 
       // Get line number
       const beforeMatch = content.substring(0, match.index);
@@ -833,6 +883,19 @@ function scanContent(content, filePath, repoName) {
 
       // Skip comment-only lines
       if (/^\s*[#\/\/]/.test(lineContent) && !/key|secret|token|password/i.test(lineContent)) continue;
+
+      // Skip lines that look like documentation/description text
+      if (/description\s*[:=]|#\s*example|\/\/\s*example|\*\s*example/i.test(lineContent)) continue;
+
+      // Extra checks for generic password pattern
+      const isGenericPattern = pattern.name === 'Generic Secret (env)';
+      if (isGenericPattern) {
+        const valueMatch = matchStr.match(/['"]([^'"]+)['"]/);
+        const val = valueMatch ? valueMatch[1] : matchStr;
+        if (isMaskedValue(val)) continue;
+        if (val.length < 12) continue;
+        if (/temp|dummy|default|change|sample|test|demo|fake|mock/i.test(val)) continue;
+      }
 
       const { snippet } = getContext(content, match.index, matchStr.length);
 
